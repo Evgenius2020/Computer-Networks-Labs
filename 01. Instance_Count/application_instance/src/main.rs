@@ -1,15 +1,42 @@
 use std::io::prelude::*;
+use std::env;
 use std::net::TcpListener;
-
-const INSTANCE_MARKER: &str = "Instance";
+use std::process;
+use std::thread;
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let addr = env::args().nth(1).unwrap_or_else(|| {
+        println!("Usage: {} 'ip:port'", env::args().nth(0).unwrap());
+        process::exit(1);
+    });
+
+    let listener: TcpListener = match TcpListener::bind(&addr) {
+        Ok(listener) => {
+            println!("Started listening at {}", &addr);
+            listener
+        }
+        Err(err) => {
+            println!("Binding error: {}", err);
+            process::exit(1);
+        }
+    };
 
     for stream in listener.incoming() {
-        stream
-            .unwrap()
-            .write(String::from(INSTANCE_MARKER).as_bytes())
-            .unwrap();
+        thread::spawn(|| {
+            println!("Received connection");
+            let mut stream = stream.unwrap();
+            let mut buf = [0;512];
+            for _ in 0..5 {
+                match stream.read(&mut buf) {
+                    Err(err) => panic!("Reading error: {}", err),
+                    Ok(_) => {
+                        stream.write_all(&buf).unwrap_or_else(|err| {
+                            panic!("Writing error: {}", err);
+                        });
+                        stream.flush().unwrap();
+                    }
+                };
+            }
+        });
     }
 }
