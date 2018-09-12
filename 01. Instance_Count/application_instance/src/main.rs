@@ -1,5 +1,5 @@
-use std::io::prelude::*;
 use std::env;
+use std::io::prelude::*;
 use std::net::TcpListener;
 use std::process;
 use std::thread;
@@ -25,17 +25,16 @@ fn main() {
         thread::spawn(|| {
             println!("Received connection");
             let mut stream = stream.unwrap();
-            let mut buf = [0;512];
-            for _ in 0..5 {
+            let mut buf = [0; 64];
+            loop {
                 match stream.read(&mut buf) {
                     Err(err) => panic!("Reading error: {}", err),
                     Ok(_) => {
                         stream.write_all(&buf).unwrap_or_else(|err| {
                             panic!("Writing error: {}", err);
                         });
-                        stream.flush().unwrap();
                     }
-                };
+                }
             }
         });
     }
