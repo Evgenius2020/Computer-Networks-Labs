@@ -1,4 +1,4 @@
 [[package]]
-name = "application_instance"
+name = "multicast_group"
 version = "0.1.0"
 

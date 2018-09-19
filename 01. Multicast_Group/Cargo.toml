@@ -1,5 +1,5 @@
 [package]
-name = "count_instances"
+name = "multicast_group"
 version = "0.1.0"
 authors = ["Evgenius2020 <spleen47@mail.ru>"]
 
