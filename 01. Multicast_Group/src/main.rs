@@ -1,27 +1,41 @@
 use std::collections::HashMap;
 use std::env;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::thread;
 use std::time::Duration;
 
+fn join_multicast(addr: SocketAddr) -> UdpSocket {
+    let local_addr : IpAddr = match addr.ip() {
+        IpAddr::V4(_) => Ipv4Addr::new(0, 0, 0, 0).into(),
+        IpAddr::V6(_) => Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into()
+    };
+
+    let socket =
+        UdpSocket::bind(SocketAddr::new(local_addr.into(), addr.port())).expect("Bad ip addr");
+
+    match addr.ip() {
+        IpAddr::V4(ip_addr) => socket
+            .join_multicast_v4(&ip_addr, &Ipv4Addr::new(0, 0, 0, 0))
+            .expect("Join error"),
+        IpAddr::V6(ip_addr) => socket.join_multicast_v6(&ip_addr, 0).expect("Join error"),
+    };
+
+    socket
+}
+
 fn main() {
-    let port = env::args()
+    let multicast_addr = env::args()
         .nth(1)
-        .expect("Port not specified!")
-        .parse::<u16>()
+        .expect("Multicast not specified!")
+        .parse::<SocketAddr>()
         .expect("Failed to parse!");
 
-    let local_addr = Ipv4Addr::new(0, 0, 0, 0);
-    let socket = UdpSocket::bind(SocketAddr::new(local_addr.into(), port)).expect("Bad ip addr");
-    let multicast_addr = Ipv4Addr::new(224, 0, 0, 123);
-    socket
-        .join_multicast_v4(&multicast_addr, &local_addr)
-        .expect("Join error");
+    let socket = join_multicast(multicast_addr);
 
     let socket_copy = socket.try_clone().expect("Failed to clone socket");
     thread::spawn(move || {
-        let multicast_addr = SocketAddr::new(multicast_addr.into(), 1337);
         let socket = socket_copy;
+        socket.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
         let message = b"Hello from client!";
         loop {
             socket
@@ -31,18 +45,16 @@ fn main() {
         }
     });
 
-    const ACTIVITY_DURATION: i16 = 3000;
     thread::spawn(move || {
-        let mut buf = [0u8; 256];
+        const REFRESH_DELAY: u64 = 100;
+        const ACTIVITY_DURATION: i16 = 3000;
+        assert!(REFRESH_DELAY > 0);
+        let mut buf = [0u8; 32];
         let mut activity = HashMap::new();
-        let socket = socket.try_clone().expect("Failed to clone socket");
-        socket
-            .set_read_timeout(Some(Duration::from_millis(100)))
-            .expect("Failed to set read timeout");
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((_, remote_addr)) => {
-                    activity.entry(remote_addr).or_insert(3000);
+                    activity.entry(remote_addr).or_insert(ACTIVITY_DURATION);
                     activity.insert(remote_addr, ACTIVITY_DURATION);
                 }
                 Err(_) => { /* timeout */ }
@@ -51,13 +63,13 @@ fn main() {
             print!("{}[2J", 27 as char);
             let addrs = activity.iter_mut();
             for (addr, last_seen) in addrs {
-                 *last_seen -= 50;
                 if *last_seen > 0 {
                     println!("{} {}", addr, last_seen)
                 }
+                *last_seen -= REFRESH_DELAY as i16;
             }
 
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(REFRESH_DELAY));
         }
     });
 
