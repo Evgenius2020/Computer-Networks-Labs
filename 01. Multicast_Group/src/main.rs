@@ -34,8 +34,7 @@ fn main() {
 
     let socket_copy = socket.try_clone().expect("Failed to clone socket");
     thread::spawn(move || {
-        let socket = socket_copy;
-        socket.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let socket = socket_copy;        
         let message = b"Hello from client!";
         loop {
             socket
@@ -49,6 +48,7 @@ fn main() {
         const REFRESH_DELAY: u64 = 100;
         const ACTIVITY_DURATION: i16 = 3000;
         assert!(REFRESH_DELAY > 0);
+        socket.set_read_timeout(Some(Duration::from_millis(REFRESH_DELAY))).unwrap();
         let mut buf = [0u8; 32];
         let mut activity = HashMap::new();
         loop {
@@ -60,13 +60,16 @@ fn main() {
                 Err(_) => { /* timeout */ }
             }
 
-            print!("{}[2J", 27 as char);
+            
+            #[cfg(unix)] println!("{}[2J", 27 as char); // Clear screen
+            println!("==== Addr ======= Last_Seen ====");
+
             let addrs = activity.iter_mut();
             for (addr, last_seen) in addrs {
                 if *last_seen > 0 {
-                    println!("{} {}", addr, last_seen)
+                    println!("{} {}", addr, last_seen);
+                    *last_seen -= REFRESH_DELAY as i16;
                 }
-                *last_seen -= REFRESH_DELAY as i16;
             }
 
             thread::sleep(Duration::from_millis(REFRESH_DELAY));
