@@ -1,0 +1,6 @@
+[package]
+name = "tcp_file_storage_client"
+version = "0.1.0"
+authors = ["evgenius2020"]
+
+[dependencies]
