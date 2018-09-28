@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Instant, Duration};
 
 fn read_line_without_delimeter(stream: &mut BufRead) -> String {
     let mut result = String::new();
@@ -14,26 +14,40 @@ fn read_line_without_delimeter(stream: &mut BufRead) -> String {
     result
 }
 
+fn size_to_string(size: usize) -> String {
+    if size < 1000 {
+        format!("{} b", size)
+    } else if size < 1000 * 1000 {
+        format!("{:.3} Kb", size as f32 / 1000.)
+    } else if size < 1000 * 1000 * 1000 {
+        format!("{:.3} Mb", size as f32 / 1000000.)
+    } else {
+        format!("{:.3} Gb", size as f32 / 1000000000.)
+    }
+}
+
 fn indicator(bytes_read: &Arc<Mutex<usize>>, client_addr: SocketAddr, file_size: usize) {
     let bytes_read = Arc::clone(&bytes_read);
     thread::spawn(move || {
-        const REFRESH_INTERVAL_SECS: u64 = 3;
         let mut bytes_read_before: usize = 0;
         loop {
-            thread::sleep(Duration::from_secs(REFRESH_INTERVAL_SECS));
+            let time_start = Instant::now();
+            thread::sleep(Duration::from_secs(2));
             let bytes_read = bytes_read.lock().unwrap();
-
-            println!(
-                "[{}]: {}/{} bytes received ({} b/s).",
-                client_addr,
-                *bytes_read,
-                file_size,
-                *bytes_read - bytes_read_before / REFRESH_INTERVAL_SECS as usize
-            );
 
             if *bytes_read == file_size {
                 break;
             }
+            let time_spent = time_start.elapsed().as_secs();
+
+            let bytes_per_second = *bytes_read - bytes_read_before / time_spent as usize;
+            println!(
+                "[{}]: {:.2}% received ({}/s).",
+                client_addr,
+                (*bytes_read as f32 / file_size as f32) * 100.,
+                size_to_string(bytes_per_second)
+            );
+
             bytes_read_before = *bytes_read;
         }
     });
@@ -65,7 +79,7 @@ fn main() {
             let file_size = read_line_without_delimeter(&mut stream)
                 .parse::<usize>()
                 .expect("Failed to parse filesize");
-            println!("[{}]: {} bytes left ...", client_addr, file_size);
+            println!("[{}]: {} left ...", client_addr, size_to_string(file_size));
 
             const BUF_SIZE: usize = 4096;
             let bytes_read: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
