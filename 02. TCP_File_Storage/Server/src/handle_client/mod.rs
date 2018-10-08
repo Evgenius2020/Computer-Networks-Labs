@@ -87,7 +87,11 @@ pub fn handle_client_connection(stream: TcpStream) {
             }
         }
 
-        let seconds_elapsed = time_start.elapsed().as_secs();
+        // Small files can come in less than a second.
+        let seconds_elapsed = match time_start.elapsed().as_secs() {
+            0 => 1,
+            seconds_elapsed => seconds_elapsed
+        };
         println!(
             "[{}]: Sent '{}' in {} seconds ({}/s).",
             client_addr,
