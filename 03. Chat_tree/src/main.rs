@@ -5,6 +5,8 @@ use std::time::Duration;
 
 extern crate rand;
 use rand::*;
+extern crate uuid;
+use uuid::Uuid;
 // mod tree_node;
 // use self::tree_node::TreeNode;
 
@@ -39,10 +41,10 @@ fn main() {
     }
 
     loop {
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 16];
         match socket.recv_from(&mut buf) {
             Ok((_, src_addr)) => {
-                println!("received {}", String::from_utf8_lossy(&buf));
+                println!("received {}", Uuid::from_bytes(buf));
                 let rand_number = rand_generator.gen_range(0, 100);
                 if rand_number > fail_chance {
                     socket
@@ -54,22 +56,24 @@ fn main() {
                         childs.push(src_addr);
                     }
 
-                    childs = bcast(&socket, &mut childs, Some(src_addr));
+                    childs = bcast(&buf, &socket, &mut childs, Some(src_addr));
                 }
             }
             Err(_) => { /* timeout */ }
         };
 
         let rand_number = rand_generator.gen_range(0, 100);
-        if rand_number > 90 {
-            println!("bcasting..");
-            childs = bcast(&socket, &mut childs, None);
+        if rand_number > 98 {
+            let message = Uuid::new_v4();
+            println!("bcasting {} ..", message);
+            childs = bcast(message.as_bytes(), &socket, &mut childs, None);
         }
         thread::sleep(Duration::from_millis(100));
     }
 }
 
 fn bcast(
+    message: &[u8],
     socket: &UdpSocket,
     childs: &mut Vec<SocketAddr>,
     filter_addr: Option<SocketAddr>,
@@ -81,8 +85,8 @@ fn bcast(
             result.push(child_addr);
             continue;
         }
-        if send(&socket, "shit".as_bytes(), &child_addr) {
-            println!("{} complete sent", child_addr);
+        if send(&socket, message, &child_addr) {
+            // println!("{} complete sent", child_addr);
             result.push(child_addr);
         } else {
             println!("{} removed", child_addr);
@@ -94,11 +98,9 @@ fn bcast(
 
 fn send(socket: &UdpSocket, buf: &[u8], addr: &SocketAddr) -> bool {
     socket.send_to(buf, addr).expect("send_to err");
-    let mut confirmation_raw = [0u8; 4096];
+    let mut confirmation_raw = [0u8; 16];
     let mut atempts_left = 3;
     loop {
-        println!("attemptions left {}", atempts_left);
-
         match socket.recv_from(&mut confirmation_raw) {
             Ok((_, _)) => {
                 return true;
@@ -111,6 +113,8 @@ fn send(socket: &UdpSocket, buf: &[u8], addr: &SocketAddr) -> bool {
                 atempts_left -= 1;
             }
         }
+
+        println!("attemptions left {}", atempts_left);
         thread::sleep(Duration::from_millis(1000));
     }
 }
