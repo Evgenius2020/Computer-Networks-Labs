@@ -17,10 +17,16 @@ fn main() {
         .parse::<SocketAddr>()
         .expect("Failed to parse address");
 
-    let parent_addr: Option<SocketAddr> = match env::args().len() > 2 {
+    let recv_fail_chance = env::args()
+        .nth(2)
+        .expect("'recv_fail_chance' not specified!")
+        .parse::<u8>()
+        .expect("Failed to parse recv_fail_chance");
+
+    let parent_addr: Option<SocketAddr> = match env::args().len() > 3 {
         true => Some(
             env::args()
-                .nth(2)
+                .nth(3)
                 .unwrap()
                 .parse::<SocketAddr>()
                 .expect("Failed to parse parent address"),
@@ -33,7 +39,6 @@ fn main() {
         .set_read_timeout(Some(Duration::from_millis(100)))
         .expect("set timeout errror");
     let mut rand_generator = rand::thread_rng();
-    let fail_chance = 0;
 
     let mut childs: Vec<SocketAddr> = Vec::new();
     if parent_addr.is_some() {
@@ -46,7 +51,7 @@ fn main() {
             Ok((_, src_addr)) => {
                 println!("received {}", Uuid::from_bytes(buf));
                 let rand_number = rand_generator.gen_range(0, 100);
-                if rand_number > fail_chance {
+                if rand_number > recv_fail_chance {
                     socket
                         .send_to("ok".as_bytes(), src_addr)
                         .expect("send Ok error");
@@ -63,7 +68,7 @@ fn main() {
         };
 
         let rand_number = rand_generator.gen_range(0, 100);
-        if rand_number > 98 {
+        if rand_number > 90 {
             let message = Uuid::new_v4();
             println!("bcasting {} ..", message);
             childs = bcast(message.as_bytes(), &socket, &mut childs, None);
