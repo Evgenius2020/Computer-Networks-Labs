@@ -49,20 +49,12 @@ fn main() {
                         .send_to("ok".as_bytes(), src_addr)
                         .expect("send Ok error");
 
-                    match childs.iter().find(|&child| *child == src_addr) {
-                        Some(_) => println!("{} already added", src_addr),
-                        None => {
-                            println!("{} added", src_addr);
-                            childs.push(src_addr);
-                        }
+                    if None == childs.iter().find(|&child| *child == src_addr) {
+                        println!("{} added", src_addr);
+                        childs.push(src_addr);
                     }
 
-                    for child_adrr in childs.iter() {
-                        if *child_adrr == src_addr {
-                            continue;
-                        }
-                        send(&socket, &buf, child_adrr);
-                    }
+                    childs = bcast(&socket, &mut childs, Some(src_addr));
                 }
             }
             Err(_) => { /* timeout */ }
@@ -71,12 +63,33 @@ fn main() {
         let rand_number = rand_generator.gen_range(0, 100);
         if rand_number > 90 {
             println!("bcasting..");
-            for child_adrr in childs.iter() {
-                send(&socket, "shit".as_bytes(), child_adrr);
-            }
+            childs = bcast(&socket, &mut childs, None);
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn bcast(
+    socket: &UdpSocket,
+    childs: &mut Vec<SocketAddr>,
+    filter_addr: Option<SocketAddr>,
+) -> Vec<SocketAddr> {
+    let mut result = Vec::new();
+
+    for child_addr in childs.clone() {
+        if filter_addr.is_some() && child_addr == filter_addr.unwrap() {
+            result.push(child_addr);
+            continue;
+        }
+        if send(&socket, "shit".as_bytes(), &child_addr) {
+            println!("{} complete sent", child_addr);
+            result.push(child_addr);
+        } else {
+            println!("{} removed", child_addr);
+        }
+    }
+
+    result
 }
 
 fn send(socket: &UdpSocket, buf: &[u8], addr: &SocketAddr) -> bool {
@@ -84,6 +97,8 @@ fn send(socket: &UdpSocket, buf: &[u8], addr: &SocketAddr) -> bool {
     let mut confirmation_raw = [0u8; 4096];
     let mut atempts_left = 3;
     loop {
+        println!("attemptions left {}", atempts_left);
+
         match socket.recv_from(&mut confirmation_raw) {
             Ok((_, _)) => {
                 return true;
@@ -96,6 +111,6 @@ fn send(socket: &UdpSocket, buf: &[u8], addr: &SocketAddr) -> bool {
                 atempts_left -= 1;
             }
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(1000));
     }
 }
