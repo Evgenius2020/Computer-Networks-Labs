@@ -46,22 +46,17 @@ fn main() {
     socket
         .set_read_timeout(Some(Duration::from_millis(100)))
         .expect("set_read_timeout errror");
-    let socket: Arc<Mutex<UdpSocket>> = Arc::new(Mutex::new(socket));
 
-    let childs: Arc<Mutex<Vec<SocketAddr>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut childs = Vec::new();
     if parent_addr.is_some() {
-        childs.lock().unwrap().push(parent_addr.unwrap());
+        childs.push(parent_addr.unwrap());
     }
     let messages: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+    let tree_node = Arc::new(Mutex::new(TreeNode::new(socket, childs)));
 
     threads::messages_generating_thread(messages.clone(), node_name.to_string());
-    threads::receiving_thread(
-        messages.clone(),
-        socket.clone(),
-        childs.clone(),
-        recv_fail_chance,
-    );
-    threads::sending_thread(messages.clone(), socket.clone(), childs.clone());
+    threads::receiving_thread(messages.clone(), tree_node.clone(), recv_fail_chance);
+    threads::sending_thread(messages.clone(), tree_node.clone());
 
     loop {}
 }
