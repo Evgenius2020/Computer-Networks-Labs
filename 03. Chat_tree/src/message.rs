@@ -2,7 +2,7 @@ use serde_json;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Message {
     pub sender_name: String,
     pub received_from: Option<SocketAddr>,

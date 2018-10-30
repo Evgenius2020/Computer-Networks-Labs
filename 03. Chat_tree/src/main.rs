@@ -10,6 +10,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod cli;
 mod message;
 mod threads;
 mod tree_node;
@@ -51,12 +52,20 @@ fn main() {
     if parent_addr.is_some() {
         childs.push(parent_addr.unwrap());
     }
-    let messages: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+    let messages_to_broadcast = Arc::new(Mutex::new(Vec::new()));
+    let messages_to_read = Arc::new(Mutex::new(Vec::new()));
     let tree_node = Arc::new(Mutex::new(TreeNode::new(socket, childs)));
 
-    threads::messages_generating_thread(messages.clone(), node_name.to_string());
-    threads::receiving_thread(messages.clone(), tree_node.clone(), recv_fail_chance);
-    threads::sending_thread(messages.clone(), tree_node.clone());
-
-    loop {}
+    threads::receiving_thread(
+        messages_to_broadcast.clone(),
+        messages_to_read.clone(),
+        tree_node.clone(),
+        recv_fail_chance,
+    );
+    threads::sending_thread(messages_to_broadcast.clone(), tree_node.clone());
+    cli::start(
+        messages_to_broadcast.clone(),
+        messages_to_read.clone(),
+        node_name.to_string(),
+    );
 }

@@ -25,7 +25,6 @@ impl TreeNode {
             }
 
             if self.send(&message, &child_addr) {
-                // println!("{} complete sent", child_addr);
                 result.push(child_addr);
             } else {
                 println!("{} removed from broadcasting group", child_addr);
@@ -55,7 +54,7 @@ impl TreeNode {
                 }
             }
 
-            println!("Attempts left {}", atempts_left);
+            // println!("Attempts left {}", atempts_left);
             atempts_left -= 1;
 
             thread::sleep(Duration::from_millis(1000));

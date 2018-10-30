@@ -8,7 +8,8 @@ use TreeNode;
 use rand::{self, Rng};
 
 pub fn receiving_thread(
-    messages: Arc<Mutex<Vec<Message>>>,
+    messages_to_broadcast: Arc<Mutex<Vec<Message>>>,
+    messages_to_read: Arc<Mutex<Vec<Message>>>,
     tree_node: Arc<Mutex<TreeNode>>,
     recv_fail_chance: u8,
 ) {
@@ -22,10 +23,10 @@ pub fn receiving_thread(
                 Ok((received, src_addr)) => {
                     let message: String = String::from_utf8_lossy(&buf[..received]).to_string();
                     let mut message = Message::from_json(message);
-                    println!(
-                        "Received '{}' from '{}'",
-                        message.content, message.sender_name
-                    );
+                    // println!(
+                    //     "Received '{}' from '{}'",
+                    //     message.content, message.sender_name
+                    // );
                     let rand_number = rand_generator.gen_range(0, 100);
                     if rand_number > recv_fail_chance {
                         tree_node
@@ -39,7 +40,8 @@ pub fn receiving_thread(
                         }
 
                         message.received_from = Some(src_addr);
-                        (*messages.lock().unwrap()).push(message);
+                        (*messages_to_broadcast.lock().unwrap()).push(message.clone());
+                        (*messages_to_read.lock().unwrap()).push(message.clone());
                     }
                 }
                 Err(_) => { /* timeout */ }
@@ -50,22 +52,13 @@ pub fn receiving_thread(
     });
 }
 
-pub fn messages_generating_thread(messages: Arc<Mutex<Vec<Message>>>, node_name: String) {
-    thread::spawn(move || loop {
-        let message = Message::new(node_name.clone());
-        println!("Generated '{}' on client", message.to_json());
-        (*messages.lock().unwrap()).push(message);
-        thread::sleep(Duration::from_secs(5));
-    });
-}
-
 pub fn sending_thread(messages: Arc<Mutex<Vec<Message>>>, tree_node: Arc<Mutex<TreeNode>>) {
     thread::spawn(move || loop {
         let mut tree_node = tree_node.lock().unwrap();
         let message = messages.lock().unwrap().pop();
         if message.is_some() {
             let message = message.unwrap();
-            println!("Broadcasing '{}' started", message.to_json());
+            // println!("Broadcasing '{}' started", message.to_json());
             tree_node.broadcast(message.to_json(), message.received_from)
         }
         drop(tree_node);
