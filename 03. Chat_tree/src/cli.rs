@@ -31,7 +31,7 @@ pub fn start(
 
         let request = read();
         if request == "1" {
-            let message = Message::new(node_name.clone());
+            let message = Message::new(node_name.clone(), read());
             (*messages_to_broadcast.lock().unwrap()).push(message);
         }
         if request == "2" {

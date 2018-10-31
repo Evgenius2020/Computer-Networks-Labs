@@ -6,15 +6,17 @@ use uuid::Uuid;
 pub struct Message {
     pub sender_name: String,
     pub received_from: Option<SocketAddr>,
+    pub uid: String,
     pub content: String,
 }
 
 impl Message {
-    pub fn new(sender_name: String) -> Message {
+    pub fn new(sender_name: String, content: String) -> Message {
         Message {
             sender_name: sender_name,
             received_from: None,
-            content: Uuid::new_v4().to_string(),
+            uid: Uuid::new_v4().to_string(),
+            content: content,
         }
     }
 
@@ -32,7 +34,7 @@ mod tests {
     use super::Message;
     #[test]
     fn json_test() {
-        let message = Message::new(String::from("SENDER"));
+        let message = Message::new(String::from("SENDER"), String::from("CONTENT"));
         let json = message.to_json();
         let parsed_message = Message::from_json(json);
         assert!(message.sender_name == parsed_message.sender_name);

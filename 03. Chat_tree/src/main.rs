@@ -50,7 +50,12 @@ fn main() {
 
     let mut childs = Vec::new();
     if parent_addr.is_some() {
-        childs.push(parent_addr.unwrap());
+        let parent_addr = parent_addr.unwrap();
+        if parent_addr == addr {
+            println!("Parent address ignored.")
+        } else {
+            childs.push(parent_addr);
+        }
     }
     let messages_to_broadcast = Arc::new(Mutex::new(Vec::new()));
     let messages_to_read = Arc::new(Mutex::new(Vec::new()));

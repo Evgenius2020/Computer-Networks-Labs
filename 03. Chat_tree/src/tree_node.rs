@@ -40,7 +40,7 @@ impl TreeNode {
             .expect("send_to error");
 
         let mut confirmation_raw = [0u8; 16];
-        let mut atempts_left = 3;
+        let mut atempts_left = 5;
         loop {
             match self.socket.recv_from(&mut confirmation_raw) {
                 Ok((_, _)) => {
