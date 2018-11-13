@@ -34,6 +34,11 @@ struct LoginRequest {
     username: String,
 }
 
+#[derive(Serialize)]
+struct UsersResult {
+    users: Vec<User>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct UsersManager {
     users: Vec<User>,
@@ -46,7 +51,7 @@ impl UsersManager {
         UsersManager {
             users: Vec::new(),
             tokens: HashMap::new(),
-            next_id: 0,
+            next_id: 1,
         }
     }
 
@@ -162,6 +167,23 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
                 }
             }
         }
+        (&Method::GET, "/users") => {
+            let mut um = um.lock().unwrap();
+            let token = get_token(req);
+            match check_token(token.clone(), &um) {
+                Some(res) => return Box::new(future::ok(res)),
+                None => {
+                    return Box::new(future::ok(
+                        Response::builder()
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(
+                                serde_json::to_string(&UsersResult { users: um.users.clone() }).unwrap(),
+                            )).unwrap(),
+                    ))
+                }
+            }
+        }
+
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;
         }
