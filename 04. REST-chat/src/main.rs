@@ -177,7 +177,9 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
                         Response::builder()
                             .header(header::CONTENT_TYPE, "application/json")
                             .body(Body::from(
-                                serde_json::to_string(&UsersResult { users: um.users.clone() }).unwrap(),
+                                serde_json::to_string(&UsersResult {
+                                    users: um.users.clone(),
+                                }).unwrap(),
                             )).unwrap(),
                     ))
                 }
@@ -194,10 +196,13 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
 
 fn get_token(req: hyper::Request<hyper::Body>) -> Option<String> {
     match req.into_parts().0.headers.get("Authorization") {
-        Some(auth_header) => match auth_header.to_str().unwrap().split(" ").nth(1) {
-            Some(token) => Some(token.to_string()),
-            None => None,
-        },
+        Some(auth_header) => {
+            let words = auth_header.to_str().unwrap().split(" ");
+            if (words.clone().count() != 2) || (words.clone().nth(0).unwrap() != "Token") {
+                return None;
+            }
+            return Some(words.clone().nth(1).unwrap().to_string());
+        }
         None => None,
     }
 }
