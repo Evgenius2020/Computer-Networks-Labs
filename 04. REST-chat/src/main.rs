@@ -10,6 +10,7 @@ use futures::future;
 use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{header, Body, Method, Request, Response, Server, StatusCode};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -18,7 +19,14 @@ struct User {
     id: usize,
     username: String,
     online: bool,
-    token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct LoginResult {
+    id: usize,
+    username: String,
+    online: bool,
+    token: String,
 }
 
 #[derive(Deserialize)]
@@ -29,6 +37,7 @@ struct LoginRequest {
 #[derive(Serialize, Deserialize, Clone)]
 struct UsersManager {
     users: Vec<User>,
+    tokens: HashMap<usize, String>,
     next_id: usize,
 }
 
@@ -36,29 +45,27 @@ impl UsersManager {
     pub fn new() -> UsersManager {
         UsersManager {
             users: Vec::new(),
+            tokens: HashMap::new(),
             next_id: 0,
         }
     }
 
     pub fn get_or_create(&mut self, username: &str) -> Option<User> {
         match self.get_id_by_name(username) {
-            Some(user_id) => {
-                let user = self.get_by_id(user_id).unwrap();
-                match user.token {
-                    Some(_) => None,
-                    None => {
-                        user.token = Some(Uuid::new_v4().to_string());
-                        Some(user.clone())
-                    }
+            Some(user_id) => match self.tokens.get(&user_id) {
+                Some(_) => None,
+                None => {
+                    self.tokens.insert(user_id, generate_uuid());
+                    Some(self.get_by_id(user_id).unwrap().clone())
                 }
-            }
+            },
             None => {
                 let user = User {
                     id: self.next_id.clone(),
                     username: username.to_string(),
                     online: true,
-                    token: Some(Uuid::new_v4().to_string()),
                 };
+                self.tokens.insert(user.id, generate_uuid());
                 self.users.push(user.clone());
                 self.next_id += 1;
                 Some(user)
@@ -70,8 +77,13 @@ impl UsersManager {
         self.users.iter().position(|r| r.username == username)
     }
 
-    fn get_id_by_token(&self, token: Option<String>) -> Option<usize> {
-        self.users.iter().position(|r| r.token == token)
+    fn get_id_by_token(&self, token: &str) -> Option<usize> {
+        for (k, v) in self.tokens.iter() {
+            if v == token {
+                return Some(*k);
+            }
+        }
+        None
     }
 
     pub fn get_by_id(&mut self, id: usize) -> Option<&mut User> {
@@ -79,16 +91,29 @@ impl UsersManager {
     }
 
     pub fn logout(&mut self, token: &str) -> bool {
-        match self.get_id_by_token(Some(token.to_string())) {
+        match self.get_id_by_token(token) {
             Some(user_id) => {
+                self.tokens.remove(&user_id);
                 let mut user = self.get_by_id(user_id).unwrap();
                 user.online = false;
-                user.token = None;
                 true
             }
             None => false,
         }
     }
+
+    pub fn generate_login_result(&self, user: &User) -> LoginResult {
+        LoginResult {
+            id: user.id,
+            username: user.username.clone(),
+            online: user.online,
+            token: self.tokens.get(&user.id).unwrap().to_string(),
+        }
+    }
+}
+
+fn generate_uuid() -> String {
+    Uuid::new_v4().to_string()
 }
 
 type Fut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
@@ -108,8 +133,9 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
                 match (*um).get_or_create(&login_request.username) {
                     Some(user) => Response::builder()
                         .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(serde_json::to_string(&user).unwrap()))
-                        .unwrap(),
+                        .body(Body::from(
+                            serde_json::to_string(&um.generate_login_result(&user)).unwrap(),
+                        )).unwrap(),
                     None => Response::builder()
                         .header(
                             "WWW-Authenticate",
@@ -156,7 +182,7 @@ fn get_token(req: hyper::Request<hyper::Body>) -> Option<String> {
 
 fn check_token(token: Option<String>, um: &UsersManager) -> Option<hyper::Response<hyper::Body>> {
     match token {
-        Some(token) => match um.get_id_by_token(Some(token)) {
+        Some(token) => match um.get_id_by_token(&token) {
             Some(_) => None,
             None => Some(
                 Response::builder()
