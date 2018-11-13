@@ -11,8 +11,12 @@ use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{header, Body, Method, Request, Response, Server, StatusCode};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+const FILENAME: &str = "target/db.json";
 
 #[derive(Serialize, Deserialize, Clone)]
 struct User {
@@ -39,7 +43,7 @@ struct UsersResult {
     users: Vec<User>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
 struct UsersManager {
     users: Vec<User>,
     tokens: HashMap<usize, String>,
@@ -55,13 +59,28 @@ impl UsersManager {
         }
     }
 
-    pub fn get_or_create(&mut self, username: &str) -> Option<User> {
+    pub fn load(filename: &str) -> Option<UsersManager> {
+        match File::open(filename) {
+            Ok(reader) => match serde_json::from_reader(reader) {
+                Ok(um) => Some(um),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        }
+    }
+
+    pub fn save(&self, filename: &str) {
+        let mut output = File::create(filename).unwrap();
+        write!(output, "{}", serde_json::to_string(self).unwrap()).unwrap()
+    }
+
+    pub fn get_or_create(&mut self, username: &str) -> Option<(User, bool)> {
         match self.get_id_by_name(username) {
             Some(user_id) => match self.tokens.get(&user_id) {
                 Some(_) => None,
                 None => {
                     self.tokens.insert(user_id, generate_uuid());
-                    Some(self.get_by_id(user_id).unwrap().clone())
+                    Some((self.get_by_id(user_id).unwrap().clone(), false))
                 }
             },
             None => {
@@ -73,7 +92,7 @@ impl UsersManager {
                 self.tokens.insert(user.id, generate_uuid());
                 self.users.push(user.clone());
                 self.next_id += 1;
-                Some(user)
+                Some((user, true))
             }
         }
     }
@@ -136,11 +155,17 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
                 let mut um = um.lock().unwrap();
 
                 match (*um).get_or_create(&login_request.username) {
-                    Some(user) => Response::builder()
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(
-                            serde_json::to_string(&um.generate_login_result(&user)).unwrap(),
-                        )).unwrap(),
+                    Some((user, created)) => {
+                        if created {
+                            um.save(FILENAME);
+                        }
+
+                        Response::builder()
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(
+                                serde_json::to_string(&um.generate_login_result(&user)).unwrap(),
+                            )).unwrap()
+                    }
                     None => Response::builder()
                         .header(
                             "WWW-Authenticate",
@@ -159,6 +184,7 @@ fn on_request_received(req: Request<Body>, um: Arc<Mutex<UsersManager>>) -> Fut 
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
                     (*um).logout(&token.unwrap());
+                    um.save(FILENAME);
                     let res = Response::builder()
                         .header(header::CONTENT_TYPE, "application/json")
                         .body(Body::from(r#"{ "message": "bye!" }"#))
@@ -231,7 +257,11 @@ fn main() {
     let addr = ([127, 0, 0, 1], 1337).into();
 
     hyper::rt::run(future::lazy(move || {
-        let um = Arc::new(Mutex::new(UsersManager::new()));
+        let um = match UsersManager::load(FILENAME) {
+            Some(um) => um,
+            None => UsersManager::new(),
+        };
+        let um = Arc::new(Mutex::new(um));
 
         let server = Server::bind(&addr)
             .serve(move || {
