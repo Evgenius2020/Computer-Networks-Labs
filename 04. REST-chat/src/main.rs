@@ -67,11 +67,17 @@ pub struct MessageSendResult {
 
 type Fut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
+enum MethodName {
+    Login,
+    Logout,
+    Users,
+    Messages,
+}
 fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
     let mut response = Response::new(Body::empty());
 
-    match (req.method(), req.uri().path()) {
-        (&Method::POST, "/login") => {
+    match (req.method(), get_method_name(req.uri().path())) {
+        (&Method::POST, Some(MethodName::Login)) => {
             let res = req.into_body().concat2().map(move |chunk| {
                 let body = chunk.iter().cloned().collect::<Vec<u8>>();
                 let login_request: LoginRequest =
@@ -102,7 +108,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
             });
             return Box::new(res);
         }
-        (&Method::POST, "/logout") => {
+        (&Method::POST, Some(MethodName::Logout)) => {
             let mut dm = dm.lock().unwrap();
             let token = get_token(&req.into_parts().0);
             match check_token(token.clone(), &dm) {
@@ -118,23 +124,48 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
                 }
             }
         }
-        (&Method::GET, "/users") => {
+        (&Method::GET, Some(MethodName::Users)) => {
             let mut dm = dm.lock().unwrap();
-            let token = get_token(&req.into_parts().0);
+            let head = req.into_parts().0;
+            let token = get_token(&head);
             match check_token(token.clone(), &dm) {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
+                    let res_json: String = match get_id_from_message_request(head.uri.to_string()) {
+                        Some(user_id) => match (*dm).get_by_id(user_id) {
+                            Some(user) => serde_json::to_string(user).unwrap(),
+                            None => {
+                                return Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::NOT_FOUND)
+                                        .body(Body::from(""))
+                                        .unwrap(),
+                                ))
+                            }
+                        },
+                        None => {
+                            if head.uri == "/users" {
+                                serde_json::to_string(&(*dm).generate_users_result()).unwrap()
+                            } else {
+                                return Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(Body::from(""))
+                                        .unwrap(),
+                                ));
+                            }
+                        }
+                    };
                     return Box::new(future::ok(
                         Response::builder()
                             .header(header::CONTENT_TYPE, "application/json")
-                            .body(Body::from(
-                                serde_json::to_string(&(*dm).generate_users_result()).unwrap(),
-                            )).unwrap(),
-                    ))
+                            .body(Body::from(res_json))
+                            .unwrap(),
+                    ));
                 }
             }
         }
-        (&Method::POST, "/messages") => {
+        (&Method::POST, Some(MethodName::Messages)) => {
             let (head, body) = req.into_parts();
             let token = get_token(&head);
             let ch_tk = check_token(token.clone(), &dm.lock().unwrap());
@@ -147,21 +178,20 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
                             serde_json::from_str(&String::from_utf8(body).unwrap()).unwrap();
                         let mut dm = dm.lock().unwrap();
 
-                        let message_send_result = &dm.add_message(message_send_request, &token.unwrap());
+                        let message_send_result =
+                            &dm.add_message(message_send_request, &token.unwrap());
                         dm.save(FILENAME);
                         Response::builder()
                             .header(header::CONTENT_TYPE, "application/json")
                             .body(Body::from(
-                                serde_json::to_string(
-                                    message_send_result
-                                ).unwrap(),
+                                serde_json::to_string(message_send_result).unwrap(),
                             )).unwrap()
                     });
                     return Box::new(res);
                 }
             }
         }
-        (&Method::GET, "/messages") => {
+        (&Method::GET, Some(MethodName::Messages)) => {
             let mut dm = dm.lock().unwrap();
             let token = get_token(&req.into_parts().0);
             match check_token(token.clone(), &dm) {
@@ -199,6 +229,20 @@ fn get_token(head: &hyper::http::request::Parts) -> Option<String> {
     }
 }
 
+fn get_id_from_message_request(path: String) -> Option<usize> {
+    let mut split = path.split("/");
+    if (split.clone().count() != 3)
+        || (split.nth(0).unwrap() != "")
+        || (split.nth(0).unwrap() != "users")
+    {
+        return None;
+    }
+    match split.nth(0).unwrap().parse::<usize>() {
+        Ok(id) => Some(id),
+        Err(_) => None,
+    }
+}
+
 fn check_token(token: Option<String>, dm: &DataManager) -> Option<hyper::Response<hyper::Body>> {
     match token {
         Some(token) => match dm.get_id_by_token(&token) {
@@ -216,6 +260,24 @@ fn check_token(token: Option<String>, dm: &DataManager) -> Option<hyper::Respons
                 .body(Body::from(""))
                 .unwrap(),
         ),
+    }
+}
+
+fn get_method_name(path: &str) -> Option<MethodName> {
+    match path.to_string().split("/").nth(1) {
+        Some(root) => {
+            if root == "login" {
+                return Some(MethodName::Login);
+            } else if root == "logout" {
+                return Some(MethodName::Logout);
+            } else if root == "users" {
+                return Some(MethodName::Users);
+            } else if root == "messages" {
+                return Some(MethodName::Messages);
+            }
+            None
+        }
+        None => None,
     }
 }
 
