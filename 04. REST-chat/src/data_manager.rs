@@ -1,15 +1,11 @@
-use MessagesResult;
+use datatypes::{
+    LoginResult, Message, MessageSendRequest, MessageSendResult, MessagesResult, User, UsersResult,
+};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use uuid::Uuid;
-use LoginResult;
-use Message;
-use MessageSendRequest;
-use MessageSendResult;
-use User;
-use UsersResult;
 
 #[derive(Serialize, Deserialize)]
 pub struct DataManager {
@@ -101,13 +97,13 @@ impl DataManager {
         }
     }
 
-    pub fn generate_messages_result(&self, from: usize, to: usize) -> MessagesResult {
+    pub fn generate_messages_result(&self, offset: usize, count: usize) -> MessagesResult {
         let mut result = MessagesResult {
-            messages: Vec::new()
+            messages: Vec::new(),
         };
 
         for message in self.messages.iter() {
-            if message.id >= from || message.id <= to {
+            if message.id - 1 >= offset && message.id - 1 < offset + count {
                 result.messages.push(message.clone());
             }
         }

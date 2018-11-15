@@ -6,64 +6,20 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate url;
 
+use datatypes::LoginRequest;
+use datatypes::MessageSendRequest;
 use futures::future;
 use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{header, Body, Method, Request, Response, Server, StatusCode};
+use std::fmt::Error;
 use std::sync::{Arc, Mutex};
 
 mod data_manager;
+mod datatypes;
 use data_manager::DataManager;
 
 const FILENAME: &str = "target/db.json";
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct User {
-    id: usize,
-    username: String,
-    online: bool,
-}
-
-#[derive(Serialize)]
-pub struct LoginResult {
-    id: usize,
-    username: String,
-    online: bool,
-    token: String,
-}
-
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    username: String,
-}
-
-#[derive(Serialize)]
-pub struct UsersResult {
-    users: Vec<User>,
-}
-
-#[derive(Serialize)]
-pub struct MessagesResult {
-    messages: Vec<Message>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Message {
-    id: usize,
-    message: String,
-    author: usize,
-}
-
-#[derive(Deserialize)]
-pub struct MessageSendRequest {
-    message: String,
-}
-
-#[derive(Serialize)]
-pub struct MessageSendResult {
-    id: usize,
-    message: String,
-}
 
 type Fut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
@@ -131,7 +87,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
             match check_token(token.clone(), &dm) {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
-                    let res_json: String = match get_id_from_message_request(head.uri.to_string()) {
+                    let res_json: String = match get_id_from_users_request(head.uri.to_string()) {
                         Some(user_id) => match (*dm).get_by_id(user_id) {
                             Some(user) => serde_json::to_string(user).unwrap(),
                             None => {
@@ -192,19 +148,35 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
             }
         }
         (&Method::GET, Some(MethodName::Messages)) => {
-            let mut dm = dm.lock().unwrap();
-            let token = get_token(&req.into_parts().0);
-            match check_token(token.clone(), &dm) {
+            let (head, _) = req.into_parts();
+            let uri = head.uri.to_string();
+            let token = get_token(&head);
+            let ch_tk = check_token(token.clone(), &dm.lock().unwrap());
+            match ch_tk {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
+                    let (offset, count) = match get_message_request_interval(uri) {
+                        Ok((offset, count)) => (offset, count),
+                        Err(_) => {
+                            return Box::new(future::ok(
+                                Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .body(Body::from(""))
+                                    .unwrap(),
+                            ));
+                        }
+                    };
+                    let mut dm = dm.lock().unwrap();
+
                     return Box::new(future::ok(
                         Response::builder()
                             .header(header::CONTENT_TYPE, "application/json")
                             .body(Body::from(
-                                serde_json::to_string(&(*dm).generate_messages_result(0, 10))
-                                    .unwrap(),
+                                serde_json::to_string(
+                                    &(*dm).generate_messages_result(offset, count),
+                                ).unwrap(),
                             )).unwrap(),
-                    ))
+                    ));
                 }
             }
         }
@@ -216,6 +188,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
     Box::new(future::ok(response))
 }
 
+// Authorization: Token <sometoken>
 fn get_token(head: &hyper::http::request::Parts) -> Option<String> {
     match head.headers.get("Authorization") {
         Some(auth_header) => {
@@ -229,7 +202,12 @@ fn get_token(head: &hyper::http::request::Parts) -> Option<String> {
     }
 }
 
-fn get_id_from_message_request(path: String) -> Option<usize> {
+// /users/<id>
+fn get_id_from_users_request(path: String) -> Option<usize> {
+    if path == "/users" {
+        return None;
+    }
+
     let mut split = path.split("/");
     if (split.clone().count() != 3)
         || (split.nth(0).unwrap() != "")
@@ -241,6 +219,50 @@ fn get_id_from_message_request(path: String) -> Option<usize> {
         Ok(id) => Some(id),
         Err(_) => None,
     }
+}
+
+// /messages?offset=<offset>&count=<count>
+fn get_message_request_interval(path: String) -> Result<(usize, usize), Error> {
+    if path == "/messages" {
+        return Ok((0, 10));
+    }
+    let mut split = path.split("?");
+    if (split.clone().count() == 0)
+        || (split.clone().count() != 2)
+        || (split.nth(0).unwrap() != "/messages")
+    {
+        return Err(Error);
+    };
+
+    let mut split = split.nth(0).unwrap().split("&");
+    if split.clone().count() != 2 {
+        return Err(Error);
+    }
+
+    let mut key_value = split.nth(0).unwrap().split("=");
+    if (key_value.clone().count() != 2) || (key_value.nth(0).unwrap() != "offset") {
+        return Err(Error);
+    };
+    let offset = match key_value.nth(0).unwrap().parse::<usize>() {
+        Ok(offset) => offset,
+        Err(_) => return Err(Error),
+    };
+
+    let mut key_value = split.nth(0).unwrap().split("=");
+    if (key_value.clone().count() != 2) || (key_value.nth(0).unwrap() != "count") {
+        return Err(Error);
+    };
+    let count = match key_value.nth(0).unwrap().parse::<usize>() {
+        Ok(count) => {
+            if count > 100 {
+                return Err(Error);
+            }
+            count
+        }
+        Err(_) => return Err(Error),
+    };
+
+    Ok((offset, count))
 }
 
 fn check_token(token: Option<String>, dm: &DataManager) -> Option<hyper::Response<hyper::Body>> {
