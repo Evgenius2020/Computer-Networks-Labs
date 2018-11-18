@@ -6,29 +6,25 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate url;
 
-use datatypes::LoginRequest;
-use datatypes::MessageSendRequest;
+mod data_manager;
+mod datatypes;
+mod parsing;
+
+use data_manager::DataManager;
+use datatypes::{LoginRequest, MessageSendRequest};
 use futures::future;
 use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{header, Body, Method, Request, Response, Server, StatusCode};
-use std::fmt::Error;
+use parsing::{
+    get_id_from_users_request, get_message_request_interval, get_method_name, get_token, MethodName,
+};
 use std::sync::{Arc, Mutex};
-
-mod data_manager;
-mod datatypes;
-use data_manager::DataManager;
 
 const FILENAME: &str = "target/db.json";
 
 type Fut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
-enum MethodName {
-    Login,
-    Logout,
-    Users,
-    Messages,
-}
 fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
     let mut response = Response::new(Body::empty());
 
@@ -41,11 +37,11 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
 
                 let mut dm = dm.lock().unwrap();
 
+                dm.update_online();
+                dm.save(FILENAME);
                 match (*dm).get_or_create(&login_request.username) {
-                    Some((user, created)) => {
-                        if created {
-                            dm.save(FILENAME);
-                        }
+                    Some(user) => {
+                        dm.save(FILENAME);
 
                         Response::builder()
                             .header(header::CONTENT_TYPE, "application/json")
@@ -67,7 +63,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
         (&Method::POST, Some(MethodName::Logout)) => {
             let mut dm = dm.lock().unwrap();
             let token = get_token(&req.into_parts().0);
-            match check_token(token.clone(), &dm) {
+            match check_token_error(token.clone(), &mut dm) {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
                     (*dm).logout(&token.unwrap());
@@ -84,7 +80,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
             let mut dm = dm.lock().unwrap();
             let head = req.into_parts().0;
             let token = get_token(&head);
-            match check_token(token.clone(), &dm) {
+            match check_token_error(token.clone(), &mut dm) {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
                     let res_json: String = match get_id_from_users_request(head.uri.to_string()) {
@@ -124,7 +120,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
         (&Method::POST, Some(MethodName::Messages)) => {
             let (head, body) = req.into_parts();
             let token = get_token(&head);
-            let ch_tk = check_token(token.clone(), &dm.lock().unwrap());
+            let ch_tk = check_token_error(token.clone(), &mut dm.lock().unwrap());
             match ch_tk {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
@@ -151,7 +147,7 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
             let (head, _) = req.into_parts();
             let uri = head.uri.to_string();
             let token = get_token(&head);
-            let ch_tk = check_token(token.clone(), &dm.lock().unwrap());
+            let ch_tk = check_token_error(token.clone(), &mut dm.lock().unwrap());
             match ch_tk {
                 Some(res) => return Box::new(future::ok(res)),
                 None => {
@@ -188,87 +184,17 @@ fn on_request_received(req: Request<Body>, dm: Arc<Mutex<DataManager>>) -> Fut {
     Box::new(future::ok(response))
 }
 
-// Authorization: Token <sometoken>
-fn get_token(head: &hyper::http::request::Parts) -> Option<String> {
-    match head.headers.get("Authorization") {
-        Some(auth_header) => {
-            let words = auth_header.to_str().unwrap().split(" ");
-            if (words.clone().count() != 2) || (words.clone().nth(0).unwrap() != "Token") {
-                return None;
-            }
-            return Some(words.clone().nth(1).unwrap().to_string());
-        }
-        None => None,
-    }
-}
-
-// /users/<id>
-fn get_id_from_users_request(path: String) -> Option<usize> {
-    if path == "/users" {
-        return None;
-    }
-
-    let mut split = path.split("/");
-    if (split.clone().count() != 3)
-        || (split.nth(0).unwrap() != "")
-        || (split.nth(0).unwrap() != "users")
-    {
-        return None;
-    }
-    match split.nth(0).unwrap().parse::<usize>() {
-        Ok(id) => Some(id),
-        Err(_) => None,
-    }
-}
-
-// /messages?offset=<offset>&count=<count>
-fn get_message_request_interval(path: String) -> Result<(usize, usize), Error> {
-    if path == "/messages" {
-        return Ok((0, 10));
-    }
-    let mut split = path.split("?");
-    if (split.clone().count() == 0)
-        || (split.clone().count() != 2)
-        || (split.nth(0).unwrap() != "/messages")
-    {
-        return Err(Error);
-    };
-
-    let mut split = split.nth(0).unwrap().split("&");
-    if split.clone().count() != 2 {
-        return Err(Error);
-    }
-
-    let mut key_value = split.nth(0).unwrap().split("=");
-    if (key_value.clone().count() != 2) || (key_value.nth(0).unwrap() != "offset") {
-        return Err(Error);
-    };
-    let offset = match key_value.nth(0).unwrap().parse::<usize>() {
-        Ok(offset) => offset,
-        Err(_) => return Err(Error),
-    };
-
-    let mut key_value = split.nth(0).unwrap().split("=");
-    if (key_value.clone().count() != 2) || (key_value.nth(0).unwrap() != "count") {
-        return Err(Error);
-    };
-    let count = match key_value.nth(0).unwrap().parse::<usize>() {
-        Ok(count) => {
-            if count > 100 {
-                return Err(Error);
-            }
-            count
-        }
-        Err(_) => return Err(Error),
-    };
-
-    Ok((offset, count))
-}
-
-fn check_token(token: Option<String>, dm: &DataManager) -> Option<hyper::Response<hyper::Body>> {
+fn check_token_error(
+    token: Option<String>,
+    dm: &mut DataManager,
+) -> Option<hyper::Response<hyper::Body>> {
     match token {
         Some(token) => match dm.get_id_by_token(&token) {
-            Some(_) => None,
+            Some(id) => {
+                dm.update_last_seen(id);
+                dm.update_online();
+                None
+            }
             None => Some(
                 Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
@@ -282,24 +208,6 @@ fn check_token(token: Option<String>, dm: &DataManager) -> Option<hyper::Respons
                 .body(Body::from(""))
                 .unwrap(),
         ),
-    }
-}
-
-fn get_method_name(path: &str) -> Option<MethodName> {
-    match path.to_string().split("/").nth(1) {
-        Some(root) => {
-            if root == "login" {
-                return Some(MethodName::Login);
-            } else if root == "logout" {
-                return Some(MethodName::Logout);
-            } else if root == "users" {
-                return Some(MethodName::Users);
-            } else if root == "messages" {
-                return Some(MethodName::Messages);
-            }
-            None
-        }
-        None => None,
     }
 }
 

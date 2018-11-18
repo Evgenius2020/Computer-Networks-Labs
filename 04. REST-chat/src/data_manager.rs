@@ -5,6 +5,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -12,6 +13,7 @@ pub struct DataManager {
     users: Vec<User>,
     messages: Vec<Message>,
     tokens: HashMap<usize, String>,
+    last_seen: HashMap<usize, SystemTime>,
     users_next_id: usize,
     messages_next_id: usize,
 }
@@ -22,8 +24,9 @@ impl DataManager {
             users: Vec::new(),
             messages: Vec::new(),
             tokens: HashMap::new(),
-            users_next_id: 1,
-            messages_next_id: 1,
+            last_seen: HashMap::new(),
+            users_next_id: 0,
+            messages_next_id: 0,
         }
     }
 
@@ -42,13 +45,18 @@ impl DataManager {
         write!(output, "{}", serde_json::to_string(self).unwrap()).unwrap()
     }
 
-    pub fn get_or_create(&mut self, username: &str) -> Option<(User, bool)> {
+    pub fn get_or_create(&mut self, username: &str) -> Option<(User)> {
+        let token = DataManager::generate_uuid();
         match self.get_id_by_name(username) {
             Some(user_id) => match self.tokens.get(&user_id) {
-                Some(_) => None,
+                Some(_) => {
+                    self.update_last_seen(user_id);
+                    None
+                }
                 None => {
-                    self.tokens.insert(user_id, DataManager::generate_uuid());
-                    Some((self.get_by_id(user_id).unwrap().clone(), false))
+                    self.tokens.insert(user_id, token.clone());
+                    self.update_last_seen(user_id);
+                    Some(self.get_by_id(user_id).unwrap().clone())
                 }
             },
             None => {
@@ -57,10 +65,11 @@ impl DataManager {
                     username: username.to_string(),
                     online: true,
                 };
-                self.tokens.insert(user.id, DataManager::generate_uuid());
+                self.tokens.insert(user.id, token.clone());
+                self.update_last_seen(user.id);
                 self.users.push(user.clone());
                 self.users_next_id += 1;
-                Some((user, true))
+                Some(user)
             }
         }
     }
@@ -140,5 +149,23 @@ impl DataManager {
 
     fn generate_uuid() -> String {
         Uuid::new_v4().to_string()
+    }
+
+    pub fn update_last_seen(&mut self, id: usize) {
+        self.last_seen.insert(id, SystemTime::now());
+    }
+
+    pub fn update_online(&mut self) {
+        let mut to_offline = Vec::new();
+        for (id, last_seen) in self.last_seen.iter() {
+            if last_seen.elapsed().unwrap() > Duration::from_secs(10) {
+                to_offline.push(*id);
+            }
+        }
+
+        for id in to_offline.clone() {
+            self.tokens.remove_entry(&id);
+            self.get_by_id(id).unwrap().online = false;
+        }
     }
 }
