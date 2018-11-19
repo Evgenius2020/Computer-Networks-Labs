@@ -63,11 +63,11 @@ impl DataManager {
                 let user = User {
                     id: self.users_next_id.clone(),
                     username: username.to_string(),
-                    online: true,
+                    online: Some(true),
                 };
                 self.tokens.insert(user.id, token.clone());
-                self.update_last_seen(user.id);
                 self.users.push(user.clone());
+                self.update_last_seen(user.id);
                 self.users_next_id += 1;
                 Some(user)
             }
@@ -112,7 +112,7 @@ impl DataManager {
         };
 
         for message in self.messages.iter() {
-            if message.id - 1 >= offset && message.id - 1 < offset + count {
+            if message.id >= offset && message.id < offset + count {
                 result.messages.push(message.clone());
             }
         }
@@ -125,7 +125,7 @@ impl DataManager {
             Some(user_id) => {
                 self.tokens.remove(&user_id);
                 let mut user = self.get_by_id(user_id).unwrap();
-                user.online = false;
+                user.online = Some(false);
                 true
             }
             None => false,
@@ -153,6 +153,7 @@ impl DataManager {
 
     pub fn update_last_seen(&mut self, id: usize) {
         self.last_seen.insert(id, SystemTime::now());
+        self.get_by_id(id).unwrap().online = Some(true);
     }
 
     pub fn update_online(&mut self) {
@@ -165,7 +166,7 @@ impl DataManager {
 
         for id in to_offline.clone() {
             self.tokens.remove_entry(&id);
-            self.get_by_id(id).unwrap().online = false;
+            self.get_by_id(id).unwrap().online = None;
         }
     }
 }

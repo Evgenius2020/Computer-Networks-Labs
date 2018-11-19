@@ -2,14 +2,14 @@
 pub struct User {
     pub id: usize,
     pub username: String,
-    pub online: bool,
+    pub online: Option<bool>,
 }
 
 #[derive(Serialize)]
 pub struct LoginResult {
     pub id: usize,
     pub username: String,
-    pub online: bool,
+    pub online: Option<bool>,
     pub token: String,
 }
 
