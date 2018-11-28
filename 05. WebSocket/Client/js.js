@@ -1,94 +1,70 @@
 window.onload = () => {
-    login_button = document.getElementById("login-button");
-    logout_button = document.getElementById("logout-button");
-    login_input = document.getElementById("login-input");
-    users_div = document.getElementById("users");
-    message_input = document.getElementById("message-input");
-    messages_div = document.getElementById("messages");
-    send_button = document.getElementById("send-button");
+    let login_button = document.getElementById("login-button");
+    let logout_button = document.getElementById("logout-button");
+    let username_input = document.getElementById("login-input");
+    let users_div = document.getElementById("users");
+    let message_input = document.getElementById("message-input");
+    let messages_div = document.getElementById("messages");
+    let send_button = document.getElementById("send-button");
 
-    toAuthorized(false);
+    to_authorized(false);
+
+    let socket = new WebSocket("ws://192.168.0.104:1337")
+    socket.onmessage = (ev) => {
+        let resp = JSON.parse(ev.data);
+        let method = resp.method;
+        if (method == 'Login') {
+            let login_result = JSON.parse(resp.data);
+            if (login_result === null) {
+                return;
+            }
+
+            to_authorized(true);
+            token = login_result.token;
+        }
+        if (method == "Messages") {
+            update_messages(JSON.parse(resp.data).messages)
+        }
+    }
 
     login_button.onclick = () => {
-        var a = new XMLHttpRequest();
-        a.open("POST", "http://127.0.0.1:1337/login", true);
-        a.onload = function (e) {
-            if (a.responseText === "")
-                return;
-            resp = JSON.parse(a.responseText);
-            token = resp.token;
-            toAuthorized(true);
-            runUsersFetchLoop(token);
-            runMessagesFetchLoop(token);
-        }
-        a.send(JSON.stringify({ username: login_input.value }));
+        socket.send(JSON.stringify({
+            method: "Login",
+            data: username_input.value
+        }))
     }
 
     logout_button.onclick = () => {
-        var a = new XMLHttpRequest();
-        a.open("POST", "http://127.0.0.1:1337/logout", true);
-        a.setRequestHeader('Authorization', `Token ${token}`)
-        a.onload = function (e) {
-            if (a.responseText === "")
-                return;
-            token = null;
-            toAuthorized(false);
-        }
-        a.send();
+        socket.send(JSON.stringify({
+            method: "Logout",
+            data: username_input.value
+        }))
     }
 
     send_button.onclick = () => {
-        var a = new XMLHttpRequest();
-        a.open("POST", "http://127.0.0.1:1337/messages", true);
-        a.setRequestHeader('Authorization', `Token ${token}`)
-        a.onload = function (e) {
-            if (a.responseText === "")
-                return;
+        socket.send(JSON.stringify({
+            method: "Messages",
+            data: message_input.value
+        }))
+    }
+
+    function to_authorized(is_authorized) {
+        if (!is_authorized) {
+            token = null;
+            last_message_index = 0;
         }
-        a.send(JSON.stringify({"message": message_input.value }));
+        function disabled(isAuthorized) { return isAuthorized ? null : "disabled" };
+        login_button.disabled = !disabled(is_authorized);
+        username_input.disabled = !disabled(is_authorized);
+        logout_button.disabled = disabled(is_authorized);
+        users_div.hidden = !is_authorized;
+        message_input.hidden = !is_authorized;
+        send_button.hidden = !is_authorized;
+        messages_div.hidden = !is_authorized;
     }
 
-    function runUsersFetchLoop(token) {
-        var a = new XMLHttpRequest();
-        a.open("GET", "http://127.0.0.1:1337/users", true);
-        a.setRequestHeader('Authorization', `Token ${token}`)
-        a.onload = function (e) {
-            if (a.responseText === "")
-                return;
-
-            updateUsers(JSON.parse(a.responseText));
-            setTimeout(() => runUsersFetchLoop(token), 1000);
-        }
-        a.send();
-    }
-
-    function runMessagesFetchLoop(token) {
-        // var a = new XMLHttpRequest();
-        fetch(`http://127.0.0.1:1337/messages?offset=${last_message_index}&count=${last_message_index + 10}`, {
-            headers: {
-                'Authorization': `Token ${token}`
-            }
-        })
-            .then(resp => resp.json())
-            .then(resp => {
-                updateMessages(resp);
-                setTimeout(() => runMessagesFetchLoop(token), 1000);
-            });
-
-        // a.open("GET", `http://127.0.0.1:1337/messages?offset=${last_message_index}&count=${last_message_index + 10}`, true);
-        // a.setRequestHeader('Authorization', `Token ${token}`)
-        // a.onload = function (e) {
-        //     if (a.responseText === "")
-        //         return;
-
-        //     updateMessages(JSON.parse(a.responseText));
-        //     setTimeout(() => runMessagesFetchLoop(token), 1000);
-        // }
-        // a.send();
-    }
-
-    function updateUsers(usersJson) {
-        usersJson.users.forEach(user => {
+    function update_users(users_json) {
+        users_json.users.forEach(user => {
             id = user.id;
             if (users[id] === undefined) {
                 div = users_div.appendChild(document.createElement('div'));
@@ -99,8 +75,9 @@ window.onload = () => {
         });
     }
 
-    function updateMessages(messagesJson) {
-        messagesJson.messages.forEach(message => {
+    function update_messages(messages_json) {
+        console.log(messages_json)
+        messages_json.forEach(message => {
             id = message.id;
             if (id > last_message_index)
                 last_message_index = id;
@@ -111,20 +88,5 @@ window.onload = () => {
             }
             messages[id].div.innerText = `${message.id} ${message.message} ${message.author}`;
         });
-    }
-
-    function toAuthorized(isAuthorized) {
-        if (!isAuthorized) {
-            token = null;
-            last_message_index = 0;
-        }
-        function disabled(isAuthorized) { return isAuthorized ? null : "disabled" };
-        login_button.disabled = !disabled(isAuthorized);
-        login_input.disabled = !disabled(isAuthorized);
-        logout_button.disabled = disabled(isAuthorized);
-        users_div.hidden = !isAuthorized;
-        message_input.hidden = !isAuthorized;
-        send_button.hidden = !isAuthorized;
-        messages_div.hidden = !isAuthorized;
     }
 }
