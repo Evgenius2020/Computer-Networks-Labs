@@ -1,4 +1,6 @@
 use data_manager::DataManager;
+use datatypes::Message;
+use datatypes::MessageSendRequest;
 use datatypes::{MethodName, SocketMessage};
 use serde_json;
 use std::sync::{Arc, Mutex};
@@ -22,25 +24,64 @@ impl Handler {
 
 impl ws::Handler for Handler {
     fn on_message(&mut self, msg: ws::Message) -> Result<(), ws::Error> {
-        let req = msg.into_text()?;
-        let req: SocketMessage = match serde_json::from_str(&req) {
-            Ok(message) => message,
+        let req: String = match msg.into_text() {
+            Ok(req) => req,
             Err(_) => {
-                return Err(ws::Error::new(
-                    ws::ErrorKind::Internal,
-                    "Failed to parse request",
-                ))
+                println!("Failed to decode message as text.");
+                return Ok(());
             }
         };
+
+        let req: SocketMessage = match serde_json::from_str(&req) {
+            Ok(req) => req,
+            Err(_) => {
+                println!("Failed to parse request '{}'", req);
+                return Ok(());
+            }
+        };
+
         match req.method {
             MethodName::Login => {
                 let username = req.data;
-                let user = (*self.dm.lock().unwrap()).get_or_create(&username);
-                self.sender.send(serde_json::to_string(&user).unwrap())?
+                let mut um = self.dm.lock().unwrap();
+                let login_result = match um.get_or_create(&username) {
+                    Some(user) => {
+                        let lr = um.generate_login_result(&user);
+                        self.token = Some(lr.token.clone());
+
+                        self.sender.send(
+                            serde_json::to_string(&SocketMessage {
+                                method: MethodName::Messages,
+                                data: serde_json::to_string(&um.generate_messages_result_all())
+                                    .unwrap(),
+                            }).unwrap(),
+                        )?;
+
+                        Some(lr)
+                    }
+                    None => None,
+                };
+                let resp = SocketMessage {
+                    method: MethodName::Login,
+                    data: serde_json::to_string(&login_result).unwrap(),
+                };
+                self.sender.send(serde_json::to_string(&resp).unwrap())?
+            }
+            MethodName::Messages => {
+                match &self.token {
+                    None => return Ok(()),
+                    Some(token) => {
+                        let mut um = self.dm.lock().unwrap();
+                        let resp = SocketMessage {
+                            method: MethodName::Messages,
+                            data: serde_json::to_string(&um.add_message(req.data, &token)).unwrap(),
+                        };
+                        self.sender.send(serde_json::to_string(&resp).unwrap())?
+                    }
+                };
             }
             _ => {}
         }
-
         Ok(())
     }
 }

@@ -91,18 +91,19 @@ impl DataManager {
         self.users.iter_mut().nth(id)
     }
 
-    pub fn add_message(&mut self, message: MessageSendRequest, token: &str) -> MessageSendResult {
+    pub fn add_message(&mut self, message: String, token: &str) -> MessagesResult {
         let message = Message {
             id: self.messages_next_id,
-            message: message.message,
+            message: message,
             author: self.get_id_by_token(token).unwrap(),
         };
         self.messages.push(message.clone());
         self.messages_next_id += 1;
 
-        MessageSendResult {
-            id: message.id,
-            message: message.message,
+        let mut to_return = Vec::new();
+        to_return.push(message);
+        MessagesResult {
+            messages: to_return
         }
     }
 
@@ -118,6 +119,13 @@ impl DataManager {
         }
 
         result
+    }
+
+    pub fn generate_messages_result_all(&self) -> MessagesResult {
+        println!("all{}", self.messages.len());
+        MessagesResult {
+            messages: self.messages.clone(),
+        }
     }
 
     pub fn logout(&mut self, token: &str) -> bool {
