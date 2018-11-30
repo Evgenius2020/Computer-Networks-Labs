@@ -1,11 +1,8 @@
-use datatypes::{
-    LoginResult, Message, MessageSendRequest, MessageSendResult, MessagesResult, User, UsersResult,
-};
+use datatypes::{LoginResult, Message, MessagesResult, User, UsersResult};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -13,50 +10,48 @@ pub struct DataManager {
     users: Vec<User>,
     messages: Vec<Message>,
     tokens: HashMap<usize, String>,
-    last_seen: HashMap<usize, SystemTime>,
     users_next_id: usize,
     messages_next_id: usize,
+    filename: String,
 }
 
 impl DataManager {
-    pub fn new() -> DataManager {
+    pub fn new(filename: String) -> DataManager {
         DataManager {
             users: Vec::new(),
             messages: Vec::new(),
             tokens: HashMap::new(),
-            last_seen: HashMap::new(),
             users_next_id: 0,
             messages_next_id: 0,
+            filename: filename,
         }
     }
 
     pub fn load(filename: &str) -> Option<DataManager> {
         match File::open(filename) {
             Ok(reader) => match serde_json::from_reader(reader) {
-                Ok(um) => Some(um),
+                Ok(dm) => Some(dm),
                 Err(_) => None,
             },
             Err(_) => None,
         }
     }
 
-    pub fn save(&self, filename: &str) {
-        let mut output = File::create(filename).unwrap();
+    pub fn save(&self) {
+        let mut output = File::create(self.filename.clone()).unwrap();
         write!(output, "{}", serde_json::to_string(self).unwrap()).unwrap()
     }
 
-    pub fn get_or_create(&mut self, username: &str) -> Option<(User)> {
+    pub fn get_or_create_user(&mut self, username: &str) -> Option<(User)> {
         let token = DataManager::generate_uuid();
-        match self.get_id_by_name(username) {
+        let res = match self.get_id_by_name(username) {
             Some(user_id) => match self.tokens.get(&user_id) {
-                Some(_) => {
-                    self.update_last_seen(user_id);
-                    None
-                }
+                Some(_) => None,
                 None => {
                     self.tokens.insert(user_id, token.clone());
-                    self.update_last_seen(user_id);
-                    Some(self.get_by_id(user_id).unwrap().clone())
+                    let mut user = self.get_user_by_id(user_id).unwrap();
+                    user.online = Some(true);
+                    Some(user.clone())
                 }
             },
             None => {
@@ -67,18 +62,23 @@ impl DataManager {
                 };
                 self.tokens.insert(user.id, token.clone());
                 self.users.push(user.clone());
-                self.update_last_seen(user.id);
                 self.users_next_id += 1;
+                self.save();
                 Some(user)
             }
+        };
+        if res.is_some() {
+            self.save();
         }
+
+        res
     }
 
     fn get_id_by_name(&self, username: &str) -> Option<usize> {
         self.users.iter().position(|r| r.username == username)
     }
 
-    pub fn get_id_by_token(&self, token: &str) -> Option<usize> {
+    pub fn get_user_id_by_token(&self, token: &str) -> Option<usize> {
         for (k, v) in self.tokens.iter() {
             if v == token {
                 return Some(*k);
@@ -87,7 +87,7 @@ impl DataManager {
         None
     }
 
-    pub fn get_by_id(&mut self, id: usize) -> Option<&mut User> {
+    pub fn get_user_by_id(&mut self, id: usize) -> Option<&mut User> {
         self.users.iter_mut().nth(id)
     }
 
@@ -95,52 +95,43 @@ impl DataManager {
         let message = Message {
             id: self.messages_next_id,
             message: message,
-            author: self.get_id_by_token(token).unwrap(),
+            author: self.get_user_id_by_token(token).unwrap(),
         };
         self.messages.push(message.clone());
         self.messages_next_id += 1;
+        self.save();
 
         let mut to_return = Vec::new();
         to_return.push(message);
         MessagesResult {
-            messages: to_return
+            messages: to_return,
         }
     }
 
-    pub fn generate_messages_result(&self, offset: usize, count: usize) -> MessagesResult {
-        let mut result = MessagesResult {
-            messages: Vec::new(),
-        };
-
-        for message in self.messages.iter() {
-            if message.id >= offset && message.id < offset + count {
-                result.messages.push(message.clone());
-            }
-        }
-
-        result
-    }
-
-    pub fn generate_messages_result_all(&self) -> MessagesResult {
-        println!("all{}", self.messages.len());
+    pub fn get_messages(&self) -> MessagesResult {
         MessagesResult {
             messages: self.messages.clone(),
         }
     }
 
-    pub fn logout(&mut self, token: &str) -> bool {
-        match self.get_id_by_token(token) {
+    pub fn logout(&mut self, token: &str) -> UsersResult {
+        let user_id = match self.get_user_id_by_token(token) {
             Some(user_id) => {
                 self.tokens.remove(&user_id);
-                let mut user = self.get_by_id(user_id).unwrap();
+                let mut user = self.get_user_by_id(user_id).unwrap();
                 user.online = Some(false);
-                true
+                Some(user_id)
             }
-            None => false,
+            None => None,
+        };
+
+        if user_id.is_some() {
+            self.save();
         }
+        self.get_user(user_id.unwrap())
     }
 
-    pub fn generate_login_result(&self, user: &User) -> LoginResult {
+    pub fn login(&self, user: &User) -> LoginResult {
         LoginResult {
             id: user.id,
             username: user.username.clone(),
@@ -149,7 +140,16 @@ impl DataManager {
         }
     }
 
-    pub fn generate_users_result(&self) -> UsersResult {
+    pub fn get_user(&mut self, id: usize) -> UsersResult {
+        let mut to_return: Vec<User> = Vec::new();
+        let user = self.get_user_by_id(id);
+        if user.is_some() {
+            to_return.push(user.unwrap().clone());
+        }
+        UsersResult { users: to_return }
+    }
+
+    pub fn get_users(&mut self) -> UsersResult {
         UsersResult {
             users: self.users.clone(),
         }
@@ -157,24 +157,5 @@ impl DataManager {
 
     fn generate_uuid() -> String {
         Uuid::new_v4().to_string()
-    }
-
-    pub fn update_last_seen(&mut self, id: usize) {
-        self.last_seen.insert(id, SystemTime::now());
-        self.get_by_id(id).unwrap().online = Some(true);
-    }
-
-    pub fn update_online(&mut self) {
-        let mut to_offline = Vec::new();
-        for (id, last_seen) in self.last_seen.iter() {
-            if last_seen.elapsed().unwrap() > Duration::from_secs(10) {
-                to_offline.push(*id);
-            }
-        }
-
-        for id in to_offline.clone() {
-            self.tokens.remove_entry(&id);
-            self.get_by_id(id).unwrap().online = None;
-        }
     }
 }

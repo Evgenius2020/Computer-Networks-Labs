@@ -48,14 +48,3 @@ pub struct Message {
     pub message: String,
     pub author: usize,
 }
-
-#[derive(Deserialize)]
-pub struct MessageSendRequest {
-    pub message: String,
-}
-
-#[derive(Serialize)]
-pub struct MessageSendResult {
-    pub id: usize,
-    pub message: String,
-}

@@ -1,6 +1,4 @@
 use data_manager::DataManager;
-use datatypes::Message;
-use datatypes::MessageSendRequest;
 use datatypes::{MethodName, SocketMessage};
 use serde_json;
 use std::sync::{Arc, Mutex};
@@ -23,6 +21,29 @@ impl Handler {
 }
 
 impl ws::Handler for Handler {
+    fn on_close(&mut self, _code: ws::CloseCode, _reason: &str) {
+        match &self.token {
+            None => {}
+            Some(token) => {
+                let mut dm = self.dm.lock().unwrap();
+                match dm.get_user_id_by_token(&token) {
+                    None => {}
+                    Some(user_id) => {
+                        &dm.logout(&token);
+                        let user = dm.get_user(user_id);
+                        let resp = SocketMessage {
+                            method: MethodName::Users,
+                            data: serde_json::to_string(&user).unwrap(),
+                        };
+                        self.sender
+                            .broadcast(serde_json::to_string(&resp).unwrap())
+                            .unwrap();
+                    }
+                }
+            }
+        }
+    }
+
     fn on_message(&mut self, msg: ws::Message) -> Result<(), ws::Error> {
         let req: String = match msg.into_text() {
             Ok(req) => req,
@@ -43,19 +64,34 @@ impl ws::Handler for Handler {
         match req.method {
             MethodName::Login => {
                 let username = req.data;
-                let mut um = self.dm.lock().unwrap();
-                let login_result = match um.get_or_create(&username) {
+                let mut dm = self.dm.lock().unwrap();
+                let login_result = match dm.get_or_create_user(&username) {
                     Some(user) => {
-                        let lr = um.generate_login_result(&user);
+                        let lr = dm.login(&user);
                         self.token = Some(lr.token.clone());
 
                         self.sender.send(
                             serde_json::to_string(&SocketMessage {
                                 method: MethodName::Messages,
-                                data: serde_json::to_string(&um.generate_messages_result_all())
-                                    .unwrap(),
+                                data: serde_json::to_string(&dm.get_messages()).unwrap(),
                             }).unwrap(),
                         )?;
+
+                        self.sender.send(
+                            serde_json::to_string(&SocketMessage {
+                                method: MethodName::Users,
+                                data: serde_json::to_string(&dm.get_users()).unwrap(),
+                            }).unwrap(),
+                        )?;
+
+                        let user = dm.get_user(lr.id);
+                        let resp = SocketMessage {
+                            method: MethodName::Users,
+                            data: serde_json::to_string(&user).unwrap(),
+                        };
+                        self.sender
+                            .broadcast(serde_json::to_string(&resp).unwrap())
+                            .unwrap();
 
                         Some(lr)
                     }
@@ -71,12 +107,21 @@ impl ws::Handler for Handler {
                 match &self.token {
                     None => return Ok(()),
                     Some(token) => {
-                        let mut um = self.dm.lock().unwrap();
+                        let mut dm = self.dm.lock().unwrap();
                         let resp = SocketMessage {
                             method: MethodName::Messages,
-                            data: serde_json::to_string(&um.add_message(req.data, &token)).unwrap(),
+                            data: serde_json::to_string(&dm.add_message(req.data, &token)).unwrap(),
                         };
-                        self.sender.send(serde_json::to_string(&resp).unwrap())?
+                        self.sender
+                            .broadcast(serde_json::to_string(&resp).unwrap())?
+                    }
+                };
+            }
+            MethodName::Logout => {
+                match &self.token {
+                    None => return Ok(()),
+                    Some(_) => {
+                        self.sender.close(ws::CloseCode::Normal)?
                     }
                 };
             }

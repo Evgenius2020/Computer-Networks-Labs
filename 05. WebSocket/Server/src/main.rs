@@ -20,7 +20,7 @@ fn main() {
 
     let dm = match DataManager::load(FILENAME) {
         Some(dm) => dm,
-        None => DataManager::new(),
+        None => DataManager::new(FILENAME.to_string()),
     };
     let dm = Arc::new(Mutex::new(dm));
 
