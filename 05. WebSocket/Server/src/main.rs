@@ -20,11 +20,11 @@ fn main() {
 
     let dm = match DataManager::load(FILENAME) {
         Some(dm) => dm,
-        None => DataManager::new(),
+        None => DataManager::new(FILENAME.to_string()),
     };
     let dm = Arc::new(Mutex::new(dm));
 
-    if let Err(error) = ws::listen("192.168.0.104:1337", |out| Handler::new(out, dm.clone())) {
+    if let Err(error) = ws::listen("127.0.0.1:1337", |out| Handler::new(out, dm.clone())) {
         println!("Failed to create WebSocket due to {:?}", error);
     }
 }
