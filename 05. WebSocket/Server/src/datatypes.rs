@@ -5,6 +5,7 @@ pub enum MethodName {
     Logout,
     Users,
     Messages,
+    LoginResult
 }
 
 #[derive(Serialize, Deserialize, Clone)]

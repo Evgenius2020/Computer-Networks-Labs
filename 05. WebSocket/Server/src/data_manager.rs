@@ -40,7 +40,7 @@ impl DataManager {
 
     pub fn name_login(&mut self, username: &str) -> Option<LoginResult> {
         let token = DataManager::generate_uuid();
-        let user = match self.get_id_by_name(username) {
+        let user = match self.get_user_id_by_name(username) {
             Some(user_id) => match self.tokens.get(&user_id) {
                 Some(_) => None,
                 None => {
@@ -75,6 +75,21 @@ impl DataManager {
         }
     }
 
+    pub fn token_login(&mut self, token: &str) -> Option<LoginResult> {
+        match self.get_user_id_by_token(token) {
+            None => None,
+            Some(user_id) => {
+                let user = self.get_mut_user_by_id(user_id).unwrap().clone();
+                Some(LoginResult {
+                    id: user.id,
+                    username: user.username.clone(),
+                    online: user.online,
+                    token: token.to_string(),
+                })
+            }
+        }
+    }
+
     pub fn change_online(&mut self, id: usize, online: Option<bool>) -> Option<UsersResult> {
         let changed = match self.get_mut_user_by_id(id) {
             None => false,
@@ -83,6 +98,10 @@ impl DataManager {
                 true
             }
         };
+        
+        if online.is_some() && online.unwrap() == false {
+            self.delete_token(id);
+        }
 
         match changed {
             false => None,
@@ -93,7 +112,7 @@ impl DataManager {
         }
     }
 
-    fn get_id_by_name(&self, username: &str) -> Option<usize> {
+    fn get_user_id_by_name(&self, username: &str) -> Option<usize> {
         self.users.iter().position(|r| r.username == username)
     }
 
