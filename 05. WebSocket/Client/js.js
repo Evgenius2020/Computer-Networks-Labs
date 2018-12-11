@@ -25,6 +25,9 @@ window.onload = () => {
         if (method == "Messages") {
             update_messages(JSON.parse(resp.data).messages)
         }
+        if (method == "Users") {
+            update_users(JSON.parse(resp.data).users)
+        }
     }
 
     login_button.onclick = () => {
@@ -39,6 +42,7 @@ window.onload = () => {
             method: "Logout",
             data: username_input.value
         }))
+        to_authorized(false);
     }
 
     send_button.onclick = () => {
@@ -64,7 +68,7 @@ window.onload = () => {
     }
 
     function update_users(users_json) {
-        users_json.users.forEach(user => {
+        users_json.forEach(user => {
             id = user.id;
             if (users[id] === undefined) {
                 div = users_div.appendChild(document.createElement('div'));
@@ -76,7 +80,6 @@ window.onload = () => {
     }
 
     function update_messages(messages_json) {
-        console.log(messages_json)
         messages_json.forEach(message => {
             id = message.id;
             if (id > last_message_index)
