@@ -1,6 +1,7 @@
 #[derive(Serialize, Deserialize, Clone)]
 pub enum MethodName {
-    Login,
+    NameLogin,
+    TokenLogin,
     Logout,
     Users,
     Messages,
@@ -25,11 +26,6 @@ pub struct LoginResult {
     pub username: String,
     pub online: Option<bool>,
     pub token: String,
-}
-
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub username: String,
 }
 
 #[derive(Serialize)]
